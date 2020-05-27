@@ -110,7 +110,7 @@ def identity_block(input_tensor, kernel_size, filters, stage, block,
     bn_name_base = 'bn' + str(stage) + block
 
     x = KL.Conv2D(filters, (kernel_size, kernel_size), padding='same',
-                  name=conv_name_base, use_bias=use_bias)(x)
+                  name=conv_name_base, use_bias=use_bias)(input_tensor)
     x = BatchNorm(name=bn_name_base)(x, training=train_bn)
     x = KL.Activation('relu', name='res' + str(stage) + block + '_out')(x)
 
