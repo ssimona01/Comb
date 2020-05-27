@@ -105,106 +105,212 @@ def identity_block(input_tensor, kernel_size, filters, stage, block,
         use_bias: Boolean. To use or not use a bias in conv layers.
         train_bn: Boolean. Train or freeze Batch Norm layers
     """
-    nb_filter1, nb_filter2, nb_filter3 = filters
-    conv_name_base = 'res' + str(stage) + block + '_branch'
-    bn_name_base = 'bn' + str(stage) + block + '_branch'
 
-    x = KL.Conv2D(nb_filter1, (1, 1), name=conv_name_base + '2a',
-                  use_bias=use_bias)(input_tensor)
-    x = BatchNorm(name=bn_name_base + '2a')(x, training=train_bn)
-    x = KL.Activation('relu')(x)
+    conv_name_base = 'res' + str(stage) + block
+    bn_name_base = 'bn' + str(stage) + block
 
-    x = KL.Conv2D(nb_filter2, (kernel_size, kernel_size), padding='same',
-                  name=conv_name_base + '2b', use_bias=use_bias)(x)
-    x = BatchNorm(name=bn_name_base + '2b')(x, training=train_bn)
-    x = KL.Activation('relu')(x)
-
-    x = KL.Conv2D(nb_filter3, (1, 1), name=conv_name_base + '2c',
-                  use_bias=use_bias)(x)
-    x = BatchNorm(name=bn_name_base + '2c')(x, training=train_bn)
-
-    x = KL.Add()([x, input_tensor])
+    x = KL.Conv2D(filters, (kernel_size, kernel_size), padding='same',
+                  name=conv_name_base, use_bias=use_bias)(x)
+    x = BatchNorm(name=bn_name_base)(x, training=train_bn)
     x = KL.Activation('relu', name='res' + str(stage) + block + '_out')(x)
+
     return x
 
 
-def conv_block(input_tensor, kernel_size, filters, stage, block,
-               strides=(2, 2), use_bias=True, train_bn=True):
-    """conv_block is the block that has a conv layer at shortcut
-    # Arguments
-        input_tensor: input tensor
-        kernel_size: default 3, the kernel size of middle conv layer at main path
-        filters: list of integers, the nb_filters of 3 conv layer at main path
-        stage: integer, current stage label, used for generating layer names
-        block: 'a','b'..., current block label, used for generating layer names
-        use_bias: Boolean. To use or not use a bias in conv layers.
-        train_bn: Boolean. Train or freeze Batch Norm layers
-    Note that from stage 3, the first conv layer at main path is with subsample=(2,2)
-    And the shortcut should have subsample=(2,2) as well
-    """
-    nb_filter1, nb_filter2, nb_filter3 = filters
-    conv_name_base = 'res' + str(stage) + block + '_branch'
-    bn_name_base = 'bn' + str(stage) + block + '_branch'
-
-    x = KL.Conv2D(nb_filter1, (1, 1), strides=strides,
-                  name=conv_name_base + '2a', use_bias=use_bias)(input_tensor)
-    x = BatchNorm(name=bn_name_base + '2a')(x, training=train_bn)
-    x = KL.Activation('relu')(x)
-
-    x = KL.Conv2D(nb_filter2, (kernel_size, kernel_size), padding='same',
-                  name=conv_name_base + '2b', use_bias=use_bias)(x)
-    x = BatchNorm(name=bn_name_base + '2b')(x, training=train_bn)
-    x = KL.Activation('relu')(x)
-
-    x = KL.Conv2D(nb_filter3, (1, 1), name=conv_name_base +
-                  '2c', use_bias=use_bias)(x)
-    x = BatchNorm(name=bn_name_base + '2c')(x, training=train_bn)
-
-    shortcut = KL.Conv2D(nb_filter3, (1, 1), strides=strides,
-                         name=conv_name_base + '1', use_bias=use_bias)(input_tensor)
-    shortcut = BatchNorm(name=bn_name_base + '1')(shortcut, training=train_bn)
-
-    x = KL.Add()([x, shortcut])
-    x = KL.Activation('relu', name='res' + str(stage) + block + '_out')(x)
-    return x
-
-
-def resnet_graph(input_image, architecture, stage5=False, train_bn=True):
+def resnet_graph_stage1(input_image, mid=12, out=3, train_bn=True):
     """Build a ResNet graph.
         architecture: Can be resnet50 or resnet101
         stage5: Boolean. If False, stage5 of the network is not created
         train_bn: Boolean. Train or freeze Batch Norm layers
     """
-    assert architecture in ["resnet50", "resnet101"]
+    x = input_image
     # Stage 1
-    x = KL.ZeroPadding2D((3, 3))(input_image)
-    x = KL.Conv2D(64, (7, 7), strides=(2, 2), name='conv1', use_bias=True)(x)
-    x = BatchNorm(name='bn_conv1')(x, training=train_bn)
-    x = KL.Activation('relu')(x)
-    C1 = x = KL.MaxPooling2D((3, 3), strides=(2, 2), padding="same")(x)
+    x = identity_block(x, 3, out, stage=1, block='a', train_bn=train_bn)
+
+    x1 = identity_block(x, 3, mid, stage=1, block='b', train_bn=train_bn)
+    x2 = identity_block(x1, 3, mid, stage=1, block='c', train_bn=train_bn)
+    x3 = identity_block(x2, 3, mid, stage=1, block='d', train_bn=train_bn)
+
+    x4 = identity_block(x3, 3, mid, stage=1, block='e', train_bn=train_bn)
+
+    y3 = KL.Add()([x4, x3])
+    y3 = identity_block(y3, 3, mid, stage=1, block='f', train_bn=train_bn)
+    y2 = KL.Add()([y3, x2])
+    y2 = identity_block(x, 3, mid, stage=1, block='g', train_bn=train_bn)
+    y1 = KL.Add()([y2, x1])
+    y1 = identity_block(x, 3, out, stage=1, block='h', train_bn=train_bn)
+
+    C1 = y1 + x
+
+    return C1
+
+def resnet_graph_stage2(input_image, mid=12, out=3, train_bn=True):
+    """Build a ResNet graph.
+        architecture: Can be resnet50 or resnet101
+        stage5: Boolean. If False, stage5 of the network is not created
+        train_bn: Boolean. Train or freeze Batch Norm layers
+    """
+    x = input_image
     # Stage 2
-    x = conv_block(x, 3, [64, 64, 256], stage=2, block='a', strides=(1, 1), train_bn=train_bn)
-    x = identity_block(x, 3, [64, 64, 256], stage=2, block='b', train_bn=train_bn)
-    C2 = x = identity_block(x, 3, [64, 64, 256], stage=2, block='c', train_bn=train_bn)
+    x = identity_block(x, 3, out, stage=2, block='a', train_bn=train_bn)
+
+    x1 = identity_block(x, 3, mid, stage=2, block='b', train_bn=train_bn)
+    x1 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(x1)
+
+    x2 = identity_block(x1, 3, mid, stage=2, block='c', train_bn=train_bn)
+    x2 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(x2)
+
+    x3 = identity_block(x2, 3, mid, stage=2, block='d', train_bn=train_bn)
+
+    x4 = identity_block(x3, 3, mid, stage=2, block='e', train_bn=train_bn)
+
+    y3 = KL.Add()([x4, x3])
+    y3 = identity_block(y3, 3, mid, stage=2, block='f', train_bn=train_bn)
+    y3 = KL.UpSampling2D(size=(2, 2))(y3)
+    y2 = KL.Add()([y3, x2])
+    y2 = identity_block(x, 3, mid, stage=2, block='g', train_bn=train_bn)
+    y2 = KL.UpSampling2D(size=(2, 2))(y2)
+    y1 = KL.Add()([y2, x1])
+    y1 = identity_block(x, 3, out, stage=2, block='h', train_bn=train_bn)
+
+    C2 = y1 + x
+
+    return C2
+
+def resnet_graph_stage3(input_image, mid=12, out=3, train_bn=True):
+    """Build a ResNet graph.
+        architecture: Can be resnet50 or resnet101
+        stage5: Boolean. If False, stage5 of the network is not created
+        train_bn: Boolean. Train or freeze Batch Norm layers
+    """
+    x = input_image
     # Stage 3
-    x = conv_block(x, 3, [128, 128, 512], stage=3, block='a', train_bn=train_bn)
-    x = identity_block(x, 3, [128, 128, 512], stage=3, block='b', train_bn=train_bn)
-    x = identity_block(x, 3, [128, 128, 512], stage=3, block='c', train_bn=train_bn)
-    C3 = x = identity_block(x, 3, [128, 128, 512], stage=3, block='d', train_bn=train_bn)
+    x = identity_block(x, 3, out, stage=3, block='a', train_bn=train_bn)
+
+    x1 = identity_block(x, 3, mid, stage=3, block='b', train_bn=train_bn)
+    x1 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(x1)
+
+    x2 = identity_block(x1, 3, mid, stage=3, block='c', train_bn=train_bn)
+    x2 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(x2)
+
+    x3 = identity_block(x2, 3, mid, stage=3, block='d', train_bn=train_bn)
+    x3 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(x3)
+
+    x4 = identity_block(x3, 3, mid, stage=3, block='e', train_bn=train_bn)
+
+    x5 = identity_block(x4, 3, mid, stage=3, block='f', train_bn=train_bn)
+
+    y4 = KL.Add()([x5, x4])
+    y4 = identity_block(y4, 3, mid, stage=3, block='g', train_bn=train_bn)
+    y4 = KL.UpSampling2D(size=(2, 2))(y4)
+    y3 = KL.Add()([y4, x3])
+    y3 = identity_block(y3, 3, mid, stage=3, block='h', train_bn=train_bn)
+    y3 = KL.UpSampling2D(size=(2, 2))(y3)
+    y2 = KL.Add()([y3, x2])
+    y2 = identity_block(x, 3, mid, stage=3, block='i', train_bn=train_bn)
+    y2 = KL.UpSampling2D(size=(2, 2))(y2)
+    y1 = KL.Add()([y2, x1])
+    y1 = identity_block(x, 3, out, stage=3, block='j', train_bn=train_bn)
+
+    C3 = y1 + x
+
+    return C3
+
+def resnet_graph_stage4(input_image, mid=12, out=3, train_bn=True):
+    """Build a ResNet graph.
+        architecture: Can be resnet50 or resnet101
+        stage5: Boolean. If False, stage5 of the network is not created
+        train_bn: Boolean. Train or freeze Batch Norm layers
+    """
+    x = input_image
     # Stage 4
-    x = conv_block(x, 3, [256, 256, 1024], stage=4, block='a', train_bn=train_bn)
-    block_count = {"resnet50": 5, "resnet101": 22}[architecture]
-    for i in range(block_count):
-        x = identity_block(x, 3, [256, 256, 1024], stage=4, block=chr(98 + i), train_bn=train_bn)
-    C4 = x
+    x = identity_block(x, 3, out, stage=4, block='a', train_bn=train_bn)
+
+    x1 = identity_block(x, 3, mid, stage=4, block='b', train_bn=train_bn)
+    x1 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(x1)
+
+    x2 = identity_block(x1, 3, mid, stage=4, block='c', train_bn=train_bn)
+    x2 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(x2)
+
+    x3 = identity_block(x2, 3, mid, stage=4, block='d', train_bn=train_bn)
+    x3 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(x3)
+
+    x4 = identity_block(x3, 3, mid, stage=4, block='e', train_bn=train_bn)
+    x4 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(x4)
+
+    x5 = identity_block(x4, 3, mid, stage=4, block='f', train_bn=train_bn)
+
+    x6 = identity_block(x5, 3, mid, stage=4, block='g', train_bn=train_bn)
+
+    y5 = KL.Add()([x6, x5])
+    y5 = identity_block(y5, 3, mid, stage=4, block='h', train_bn=train_bn)
+    y5 = KL.UpSampling2D(size=(2, 2))(y5)
+    y4 = KL.Add()([y5, x4])
+    y4 = identity_block(y4, 3, mid, stage=4, block='i', train_bn=train_bn)
+    y4 = KL.UpSampling2D(size=(2, 2))(y4)
+    y3 = KL.Add()([y4, x3])
+    y3 = identity_block(y3, 3, mid, stage=4, block='j', train_bn=train_bn)
+    y3 = KL.UpSampling2D(size=(2, 2))(y3)
+    y2 = KL.Add()([y3, x2])
+    y2 = identity_block(x, 3, mid, stage=4, block='k', train_bn=train_bn)
+    y2 = KL.UpSampling2D(size=(2, 2))(y2)
+    y1 = KL.Add()([y2, x1])
+    y1 = identity_block(x, 3, out, stage=4, block='l', train_bn=train_bn)
+
+    C4 = y1 + x
+
+    return C4
+
+def resnet_graph_stage5(input_image, mid=12, out=3, train_bn=True):
+    """Build a ResNet graph.
+        architecture: Can be resnet50 or resnet101
+        stage5: Boolean. If False, stage5 of the network is not created
+        train_bn: Boolean. Train or freeze Batch Norm layers
+    """
+    x = input_image
     # Stage 5
-    if stage5:
-        x = conv_block(x, 3, [512, 512, 2048], stage=5, block='a', train_bn=train_bn)
-        x = identity_block(x, 3, [512, 512, 2048], stage=5, block='b', train_bn=train_bn)
-        C5 = x = identity_block(x, 3, [512, 512, 2048], stage=5, block='c', train_bn=train_bn)
-    else:
-        C5 = None
-    return [C1, C2, C3, C4, C5]
+    x = identity_block(x, 3, out, stage=5, block='a', train_bn=train_bn)
+
+    x1 = identity_block(x, 3, mid, stage=5, block='b', train_bn=train_bn)
+    x1 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(x1)
+
+    x2 = identity_block(x1, 3, mid, stage=5, block='c', train_bn=train_bn)
+    x2 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(x2)
+
+    x3 = identity_block(x2, 3, mid, stage=5, block='d', train_bn=train_bn)
+    x3 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(x3)
+
+    x4 = identity_block(x3, 3, mid, stage=5, block='e', train_bn=train_bn)
+    x4 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(x4)
+
+    x5 = identity_block(x4, 3, mid, stage=5, block='f', train_bn=train_bn)
+    x5 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(x5)
+
+    x6 = identity_block(x5, 3, mid, stage=5, block='g', train_bn=train_bn)
+
+    x7 = identity_block(x5, 3, mid, stage=5, block='h', train_bn=train_bn)
+
+    y6 = KL.Add()([x7, x6])
+    y6 = identity_block(y6, 3, mid, stage=5, block='i', train_bn=train_bn)
+    y6 = KL.UpSampling2D(size=(2, 2))(y6)
+    y5 = KL.Add()([y6, x5])
+    y5 = identity_block(y5, 3, mid, stage=5, block='j', train_bn=train_bn)
+    y5 = KL.UpSampling2D(size=(2, 2))(y5)
+    y4 = KL.Add()([y5, x4])
+    y4 = identity_block(y4, 3, mid, stage=5, block='k', train_bn=train_bn)
+    y4 = KL.UpSampling2D(size=(2, 2))(y4)
+    y3 = KL.Add()([y4, x3])
+    y3 = identity_block(y3, 3, mid, stage=5, block='l', train_bn=train_bn)
+    y3 = KL.UpSampling2D(size=(2, 2))(y3)
+    y2 = KL.Add()([y3, x2])
+    y2 = identity_block(x, 3, mid, stage=5, block='m', train_bn=train_bn)
+    y2 = KL.UpSampling2D(size=(2, 2))(y2)
+    y1 = KL.Add()([y2, x1])
+    y1 = identity_block(x, 3, out, stage=5, block='n', train_bn=train_bn)
+
+    C5 = y1 + x
+
+    return C5
 
 
 ############################################################
@@ -1906,12 +2012,94 @@ class MaskRCNN():
         # Bottom-up Layers
         # Returns a list of the last layers of each stage, 5 in total.
         # Don't create the thead (stage 5), so we pick the 4th item in the list.
+        x = KL.ZeroPadding2D((3, 3))(input_image)
+
         if callable(config.BACKBONE):
             _, C2, C3, C4, C5 = config.BACKBONE(input_image, stage5=True,
                                                 train_bn=config.TRAIN_BN)
         else:
-            _, C2, C3, C4, C5 = resnet_graph(input_image, config.BACKBONE,
-                                             stage5=True, train_bn=config.TRAIN_BN)
+            C5 = resnet_graph_stage5(x, mid=32, out=64, train_bn=config.TRAIN_BN)
+            C5 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(C5)
+
+            C4 = resnet_graph_stage4(C5, mid=32, out=128, train_bn=config.TRAIN_BN)
+            C4 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(C4)
+
+            C3 = resnet_graph_stage3(C4, mid=64, out=256, train_bn=config.TRAIN_BN)
+            C3 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(C3)
+
+            C2 = resnet_graph_stage2(C3, mid=128, out=512, train_bn=config.TRAIN_BN)
+            C2 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(C2)
+
+            C1 = resnet_graph_stage1(C2, mid=256, out=512, train_bn=config.TRAIN_BN)
+            C1 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(C1)
+
+            aux1 = C1
+            aux2 = C2
+            aux3 = C3
+            aux4 = C4
+            aux5 = C5
+
+            C1 = aux5
+            C2 = aux4
+            C3 = aux3
+            C4 = aux2
+            C5 = aux1
+
+            # C12 = resnet_graph_stage1(C1, mid=256, out=512, train_bn=config.TRAIN_BN)
+            # C12 = KL.UpSampling2D(size=(2, 2))(C12)
+
+            # y5 = KL.Add()([C12, C1])
+            # y5 = resnet_graph_stage1(y5, mid=256, out=512, train_bn=config.TRAIN_BN)
+            # y5up = KL.UpSampling2D(size=(2, 2))(y5)
+
+            # y4 = KL.Add()([y5up, C2])
+            # y4 = resnet_graph_stage2(y4, mid=128, out=256, train_bn=config.TRAIN_BN)
+            # y4up = KL.UpSampling2D(size=(2, 2))(y4)
+
+            # y3 = KL.Add()([y4up, C3])
+            # y3 = resnet_graph_stage3(y3, mid=64, out=128, train_bn=config.TRAIN_BN)
+            # y3up = KL.UpSampling2D(size=(2, 2))(y3)
+
+            # y2 = KL.Add()([y3up, C4])
+            # y2 = resnet_graph_stage4(y2, mid=32, out=64, train_bn=config.TRAIN_BN)
+            # y2up = KL.UpSampling2D(size=(2, 2))(y2)
+
+            # y1 = KL.Add()([y2up, C5])
+            # y1 = resnet_graph_stage5(y1, mid=16, out=64, train_bn=config.TRAIN_BN)
+
+            # C1 = y5up
+            # C2 = y4up
+            # C3 = y3up
+            # C4 = y2up
+            # C5 = y1
+            
+            # d1 = KL.Conv2D(1, (3,3), padding='same',
+            #       name=conv_name_base, use_bias=use_bias)(y1)
+            # d2 = KL.Conv2D(1, (3,3), padding='same',
+            #       name=conv_name_base, use_bias=use_bias)(y2)
+            # d2 = KL.UpSampling2D(size=(2, 2))(d2)
+
+            # d3 = KL.Conv2D(1, (3,3), padding='same',
+            #       name=conv_name_base, use_bias=use_bias)(y3)
+            # d3 = KL.UpSampling2D(size=(2, 2))(d3)
+
+            # d4 = KL.Conv2D(1, (3,3), padding='same',
+            #       name=conv_name_base, use_bias=use_bias)(y4)
+            # d4 = KL.UpSampling2D(size=(2, 2))(d4)
+
+            # d5 = KL.Conv2D(1, (3,3), padding='same',
+            #       name=conv_name_base, use_bias=use_bias)(y5)
+            # d5 = KL.UpSampling2D(size=(2, 2))(d5)
+
+            # d6 = KL.Conv2D(1, (3,3), padding='same',
+            #       name=conv_name_base, use_bias=use_bias)(y6)
+            # d6 = KL.UpSampling2D(size=(2, 2))(d6)
+
+            # outconv = KL.Add()([d1, d2, d3, d4, d5, d6])
+            # outconv = KL.Conv2D(1, (3,3), padding='same',
+            #       name=conv_name_base, use_bias=use_bias)(outconv)
+
+            
         # Top-down Layers
         # TODO: add assert to varify feature map sizes match what's in config
         P5 = KL.Conv2D(config.TOP_DOWN_PYRAMID_SIZE, (1, 1), name='fpn_c5p5')(C5)
