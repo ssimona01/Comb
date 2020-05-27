@@ -2012,12 +2012,13 @@ class MaskRCNN():
         # Bottom-up Layers
         # Returns a list of the last layers of each stage, 5 in total.
         # Don't create the thead (stage 5), so we pick the 4th item in the list.
-        x = KL.ZeroPadding2D((3, 3))(input_image)
+        
 
         if callable(config.BACKBONE):
             _, C2, C3, C4, C5 = config.BACKBONE(input_image, stage5=True,
                                                 train_bn=config.TRAIN_BN)
         else:
+            x = KL.ZeroPadding2D((3, 3))(input_image)
             C5 = resnet_graph_stage5(x, mid=32, out=64, train_bn=config.TRAIN_BN)
             C5 = KL.MaxPooling2D((2, 2), strides=(2, 2), padding="same")(C5)
 
